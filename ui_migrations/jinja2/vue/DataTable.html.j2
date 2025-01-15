@@ -1,0 +1,490 @@
+<template>
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+	<table class="dj-data-table">
+		<thead>
+			<tr>
+				{% for field_options in fields_options %}
+					{# if field_options has fields_options again, there is nested data #}
+					{% if field_options.visible_by_roles == True %}
+					<th>
+					{% else %}
+					{# make condition to only show the field for specified roles #}
+					<th v-if="Array.from<any>({| field_options.visible_by_roles|default('new Array()')|safe |}).includes(props.role)">
+					{% endif %}
+						{| field_options.display_name |}
+						{% if field_options.sortable %}
+							{# Show buttons for sorting by this field if sortable #}
+							<button @click="() => {
+								sorting.field = '{| field_options.field_name |}'
+								sorting.direction = sorting.direction === 'asc' ? 'desc' : sorting.direction === 'desc' ? null : 'asc'
+								if (!sorting.direction) {
+									sorting.field = null
+								}
+								fetchData()
+								console.log(sorting)
+							}" class="dj-data-table__sorting_btn">
+								<template v-if="sorting.direction === 'asc' && sorting.field === '{| field_options.field_name |}'">▼</template>
+								<template v-else-if="sorting.direction === 'desc' && sorting.field === '{| field_options.field_name |}'">▲</template>
+								<template v-else>▲▼</template>
+							</button>
+						{% endif %}
+					</th>
+				{% endfor %}
+				{% if addable_by_roles or removable_by_roles %}
+					{# make condition to only show column for action buttons (add, remove or custom) if there are any actions available #}
+					<th v-if="Array.from<any>({| addable_by_roles|safe |}).includes(props.role) || Array.from<any>({| removable_by_roles|safe |}).includes(props.role)">Actions</th>
+				{% elif actions_options %}
+					<th>Actions</th>
+				{% endif %}
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+			</tr>
+		</thead>
+		<tbody>
+			<tr v-for="item in items">
+				{% for field_options in fields_options %}
+					{% if field_options.visible_by_roles == True %}
+					<td>
+					{% else %}
+					{# make condition to only show the field for specified roles #}
+					<td v-if="Array.from<any>({| field_options.visible_by_roles|default('new Array()')|safe |}).includes(props.role)">
+					{% endif %}
+						{% if field_options.link %}
+							{# if link is specified, render the link #}
+							<router-link :to="replaceSubstringWithObjectValue(`{| field_options.link |}`, item)" >{{ item['{| field_options.field_name |}'] }}</router-link>
+						{% else %}
+							{# if the field is modifiable for the current role, show the right input type #}
+							<template v-if="Array.from<any>({| field_options.modifiable_by_roles|default('new Array()')|safe |}).includes(props.role)">
+								{% if fields_input_types[field_options.field_name]|safe == 'select' %}
+									<select v-model="item['{| field_options.field_name |}']">
+										{% for choice in fields_choices[field_options.field_name] %}
+											<option>{| choice |}</option>
+										{% endfor %}
+									</select>
+								{% else %}
+									<input v-model="item['{| field_options.field_name |}']" type="{| fields_input_types[field_options.field_name]|safe |}" />
+								{% endif %}
+								<button @click="async () => item ? await saveUpdate(item['pk'], '{| field_options.field_name |}', item['{| field_options.field_name |}']) : {}">Save</button>
+							</template>
+							<template v-else>
+								{# render custom components if specified #}
+								{% if field_options.custom_components_options|default(False) %}
+									{% for component_options in field_options.custom_components_options %}
+										<{| component_options.component_name |} :{| component_options.prop_name |}="item['{| field_options.field_name |}']" />
+									{% endfor %}
+								{% else %}
+								{# otherwise, show the field normally #}
+									<span>
+										{% if "date" in fields_input_types[field_options.field_name]|safe  %}
+											{{ getBeautifiedDateMaybe(item['{| field_options.field_name |}']) }}
+										{% else %}
+											{{ item['{| field_options.field_name |}'] }}
+										{% endif %}
+									</span>
+								{% endif %}
+							</template>
+						{% endif %}
+					</td>
+				{% endfor %}
+				{% if addable_by_roles or removable_by_roles or actions_options %}
+					{# add table cell for action buttons #}
+					{% if actions_options %}
+					<td>
+					{% else %}
+					<td v-if="Array.from<any>({| addable_by_roles|safe |}).includes(props.role) || Array.from<any>({| removable_by_roles|safe |}).includes(props.role)">
+					{% endif %}
+						<div class="dj-data-table__actions">
+							{% if removable_by_roles %}
+								<button @click="async () => await deleteItem(item['pk'])" v-if="Array.from<any>({| removable_by_roles|safe |}).includes(props.role)">Delete</button>
+							{% endif %}
+							{% for action_options in actions_options %}
+								{# add button for custom action with specified action types #}
+								<button @click="async () => {
+									{% for action in action_options.actions %}
+										{% if action._type == 'open_url' %}
+											{% if 'http://' in action.url or 'https://' in action.url %}
+												{% if action.new_tab %}
+													win.open(replaceSubstringWithObjectValue(`{| action.url |}`, item), '_blank')
+												{% else %}
+													win.location.href = replaceSubstringWithObjectValue(`{| action.url |}`, item)
+												{% endif %}
+											{% else %}
+												$router.push(replaceSubstringWithObjectValue(`{| action.url |}`, item))
+											{% endif %}
+										{% elif action._type == 'iterate' %}
+											await saveUpdate(item['pk'], '{| action.field_name |}', getNextItemOfArray({| fields_choices[action.field_name]|safe |}, item['{| action.field_name |}']))
+										{% elif action._type == 'toggle' %}
+											await saveUpdate(item['pk'], '{| action.field_name |}', !item['{| action.field_name |}'])
+										{% elif action._type == 'set_current_date' %}
+											await saveUpdate(item['pk'], '{| action.field_name |}', new Date())
+										{% endif %}
+									{% endfor %}
+								}" v-if="Array.from<any>({| action_options.roles|safe |}).includes(props.role)">
+									{| action_options.display_name |}
+								</button>
+							{% endfor %}
+						</div>
+					</td>
+				{% endif %}
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+			</tr>
+			{% if addable_by_roles %}
+				{# add row with empty inputs for adding items #}
+				<tr v-if="Array.from<any>({| addable_by_roles|safe |}).includes(props.role)">
+					{% for field_options in fields_options %}
+						{% if field_options.visible_by_roles|default(True) == True %}
+						<td>
+						{% else %}
+						<td v-if="Array.from<any>({| field_options.visible_by_roles|safe |}).includes(props.role)">
+						{% endif %}
+							{% if field_options.auto_generated|default(False) %}
+								<span><i>Auto</i></span>
+							{% else %}
+								<input v-model="addedItem['{| field_options.field_name |}']" />
+							{% endif %}
+						</td>
+					{% endfor %}
+					<td>
+						<div class="dj-data-table__actions">
+							<button @click="saveNew">Add</button>
+						</div>
+					</td>
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+				</tr>
+			{% endif %}
+		</tbody>
+	</table>
+	<div class="dj-data-table-pagination">
+		{# pagination controls #}
+		<span>
+			<button @click="() => fetchData(1)" :disabled="currentPage === 1">⏮</button>
+			<button @click="() => fetchData(currentPage - 1)" :disabled="currentPage === 1">⏴</button>
+			<button @click="() => fetchData(currentPage + 1)" :disabled="currentPage === totalPages">⏵</button>
+			<button @click="() => fetchData(totalPages)" :disabled="currentPage === totalPages">⏭</button>
+		</span>
+		<span>Page {{ currentPage }} of {{ totalPages }}</span>
+	</div>
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+</template>
+
+<script setup lang="ts">
+	import { ref, computed, onMounted, watch } from 'vue'
+	{% for field_options in fields_options %}
+		{% if field_options.custom_components_options|default(False) %}
+			{% for component_options in field_options.custom_components_options %}
+				{# import all custom components #}
+				import {| component_options.component_name |} from './{| component_options.component_name |}.vue'
+			{% endfor %}
+		{% endif %}
+	{% endfor %}
+
+
+	const props = defineProps<{
+		role: string,
+		authToken?: string,
+	}>()
+
+	const sorting = ref<{
+		field: string | null,
+		direction: 'asc' | 'desc' | null,
+	
+	}>({
+		field: null,
+		direction: null,
+	})
+
+	{# add all needed fields to the TypeScipt type #}
+	type Item = {
+		pk?: any,
+		{% for field_options in fields_options %}
+			{| field_options.field_name |}?: any,
+		{% endfor %}
+	}
+	
+	const items = ref<Item[]>([])
+	const currentPage = ref<number>(1)
+	const totalPages = ref<number>(1)
+
+	const allowedFields = computed<string[]>(() => {
+		const fields = []
+		{% for field_options in fields_options %}
+			{# compute which fields should be fetched for which role #}
+			{% if field_options.visible_by_roles|default(True) == True %}
+				fields.push('{| field_options.field_name |}')
+			{% else %}
+				if (Array.from<any>({| field_options.visible_by_roles|safe |}).includes(props.role)) {
+					fields.push('{| field_options.field_name |}')
+				}
+			{% endif %}
+		{% endfor %}
+		return fields
+	})
+
+/* SAFE REGION BEGIN */
+
+/* SAFE REGION END */
+
+	/**
+	 * Custom URL query that is appended to the fetch request
+	 */
+	const customQuery = computed<string>(() => {
+/* SAFE REGION BEGIN */
+		return ''
+/* SAFE REGION END */
+	})
+
+	/**
+	 * Fetch the data for this component. Only fetch the currently allowed fields.
+	 */
+	async function fetchData(page: number = currentPage.value) {
+		if (page < 1) {
+			page = 1
+		}
+		if (page > totalPages.value) {
+			page = totalPages.value
+		}
+		const sortQuery = sorting.value.field ? `&_sortBy=${sorting.value.field}&_sortDir=${sorting.value.direction || 'asc'}` : ''
+		const pageQuery = `&_pageSize={| max_items_per_page|default(100) |}&_page=${page}`
+		const response = await fetch(
+			`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s?_fields=${allowedFields.value.join(",")}${sortQuery}${pageQuery}&${customQuery.value}`,
+			{
+				headers: {
+					'Authorization': `Token ${props.authToken}`
+				}
+			}
+		)
+		const json = await response.json()
+		items.value = json.items
+		currentPage.value = json.page
+		totalPages.value = json.totalPages
+	}
+	
+	onMounted(fetchData)
+
+	watch(() => props.role, () => fetchData())
+
+	/**
+	 * Send a request to update the given `field` with the given `value` for the item with primary key `pk`
+	 */
+	async function saveUpdate(pk: any, field: string, value: any) {
+		const data = {
+			[field]: value
+		}
+		await fetch(`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s/${pk}`, {
+			method: 'PATCH',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Token ${props.authToken}`
+			},
+			body: JSON.stringify(data),
+		})
+		await fetchData()
+	}
+
+	{% if removable_by_roles %}
+		/**
+		 * Send a request to delete the item with primary key `pk`
+		 */
+		async function deleteItem(pk: any) {
+			await fetch(`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s/${pk}`, {
+				method: 'DELETE',
+				headers: {
+					'Authorization': `Token ${props.authToken}`
+				}
+			})
+			await fetchData()
+		}
+	{% endif %}
+
+	{% if addable_by_roles %}
+		const addedItem = ref<Item>({})
+
+		/**
+		 * Send a request to add the item in `addedItem` to the database
+		 */
+		async function saveNew() {
+			await fetch(`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Token ${props.authToken}`
+				},
+				body: JSON.stringify(addedItem.value),
+			})
+			await fetchData()
+			addedItem.value = {}
+		}
+	{% endif %}
+
+	/**
+	 * Replace any occurence of the format `"{key}"` in `input` with `values[key]`
+	 */
+	function replaceSubstringWithObjectValue(input: string, values: Record<string, any>): string {
+		return input.replace(/\{(.*?)\}/g, (_, key) => values[key.trim()] ?? '')
+	}
+
+	/**
+	 * Get the item of the `array` that comes after `currentItem` (circular)
+	 */
+	function getNextItemOfArray<T>(array: T[], currentItem: T): T {
+		let index = array.indexOf(currentItem);
+		if (index === -1) {
+			throw new Error('Item not found in array');
+		}
+		let nextIndex = (index + 1) % array.length;
+		return array[nextIndex];
+	}
+
+	/**
+	 * Check if a string is a valid date
+	 */
+	function isValidDate(date: string): boolean {
+		return !isNaN(Date.parse(date))
+	}
+	
+	/**
+	 * Convert `dateOrString` to the local representation of the date if it is a date, otherwise keep it unchanged
+	 */
+	function getBeautifiedDateMaybe(dateOrString: string): string {
+		const parsed = Date.parse(dateOrString)
+		if (!isNaN(parsed)) {
+			return new Date(parsed).toLocaleString()
+		}
+		return dateOrString
+	}
+
+	{% for field_options in fields_options %}
+		{% if field_options.custom_components_options|default(False) %}
+			{% for component_options in field_options.custom_components_options %}
+				const {| component_options.prop_name |} = ref<any>(null)
+			{% endfor %}
+		{% endif %}
+	{% endfor %}
+
+	const win = window
+
+/* SAFE REGION BEGIN */
+
+/* SAFE REGION END */
+</script>
+
+<style scoped>
+/* SAFE REGION BEGIN */
+
+/* SAFE REGION END */
+
+{% if styling %}
+	.dj-data-table {
+		border-spacing: 0;
+		text-align: left;
+	}
+	.dj-data-table th, .dj-data-table td {
+		padding: 0.5em;
+		margin: 0;
+		border: 1px solid #ccc;
+	}
+	.dj-data-table th {
+		background-color: #eeeeee;
+	}
+	.dj-data-table input, .dj-data-table button, .dj-data-table select {
+		font-size: 0.9em;
+	}
+	.dj-data-table button, .dj-data-table-pagination button { 
+		background-color: #404040;
+		color: white;
+		border: 2px solid #ffffff4a;
+		border-radius: 0.25em;
+		padding: 0.25em 0.5em;
+		cursor: pointer;
+	}
+	button:hover {
+		opacity: 0.8;
+	}
+	button[disabled] {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.dj-data-table button.dj-data-table__sorting_btn {
+		background: none;
+		border: none;
+		color: black;
+		padding-inline: 0;
+		text-align: center;
+		width: 2.5em;
+	}
+	.dj-data-table button.dj-data-table__sorting_btn:hover {
+		opacity: 0.5;
+	}
+
+	.dj-data-table input, .dj-data-table select {
+		background-color: #f2f2f2;
+		border: 2px solid #00000020;
+		border-radius: 0.25em;
+		padding: 0.25em 0.5em;
+	}
+
+	.dj-data-table input {
+		width: 10rem;
+	}
+
+	.dj-data-table input + button {
+		margin-left: 0.25em;
+	}
+
+	.dj-data-table select + button {
+		margin-left: 2.25em;
+	}
+
+	.dj-data-table__actions {
+		border-radius: 0.25em;
+		width: 100%;
+		display: flex;
+		flex-direction: row;
+	}
+	.dj-data-table__actions button {
+		border-radius: 0;
+		border-right: none;
+		flex-grow: 1;
+	}
+	.dj-data-table__actions button:first-child {
+		border-top-left-radius: 0.25em;
+		border-bottom-left-radius: 0.25em;
+	}
+	.dj-data-table__actions button:last-child {
+		border-top-right-radius: 0.25em;
+		border-bottom-right-radius: 0.25em;
+		border-right: 2px solid #ffffff4a;
+	}
+
+	.dj-data-table-pagination {
+		margin-top: 0.5rem;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 1rem;
+	}
+	.dj-data-table-pagination button {
+		font-size: 1rem;
+		padding-inline: 0.5rem;
+		padding-block: 0.2rem;
+	}
+	.dj-data-table-pagination button:not(:last-child) {
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
+		border-right: none;
+	}
+	.dj-data-table-pagination button:not(:first-child) {
+		border-top-left-radius: 0;
+		border-bottom-left-radius: 0;
+	}
+{% endif %}
+</style>

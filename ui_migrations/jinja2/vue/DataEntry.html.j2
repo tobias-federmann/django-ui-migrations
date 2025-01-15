@@ -1,0 +1,319 @@
+<template>
+	<div v-if="item" class="dj-data-entry">
+		<ul>
+			{% for field_options in fields_options %}
+				{% if field_options.fields_options %}
+					{# if field_options has fields_options again, there is nested data #}
+					{% if field_options.visible_by_roles == True %}
+					<li>
+					{% else %}
+					{# make condition to only show the field for specified roles #}
+					<li v-if="Array.from<any>({| field_options.visible_by_roles|default('new Array()')|safe |}).includes(props.role)">
+					{% endif %}
+						<b>{| field_options.display_name |}:</b>
+						<ul>
+							<li v-for="subItem in item['{| field_options.field_name |}']">
+								{# get inner items #}
+								<ul>
+									{% for subfield_options in field_options.fields_options %}
+										{% if subfield_options.visible_by_roles == True %}
+										<li>
+										{% else %}
+										{# make conditions for inner items #}
+										<li v-if="Array.from<any>({| subfield_options.visible_by_roles|default('new Array()')|safe |}).includes(props.role)">
+										{% endif %}
+											<b>{| subfield_options.display_name |}:</b> {{ subItem['{| subfield_options.field_name |}'] }}
+										</li>
+									{% endfor %}
+								</ul>
+							</li>
+						</ul>
+					</li>
+				{% else %}
+					{# no nested fields #}
+					{% if field_options.visible_by_roles == True %}
+					<template v-if="true">
+					{% else %}
+					{# make conditions to only show the field for specified roles #}
+					<template v-if="Array.from<any>({| field_options.visible_by_roles|default('new Array()')|safe |}).includes(props.role)">
+					{% endif %}
+						<li v-if="Array.from<any>({| field_options.modifiable_by_roles|default('new Array()')|safe |}).includes(props.role)">
+							{# if the field is modifiable for the current role, show the right input type #}
+							<b>{| field_options.display_name |}:</b>
+							{% if fields_input_types[field_options.field_name]|safe == 'select' %}
+								<select v-model="item['{| field_options.field_name |}']">
+									{% for choice in fields_choices[field] %}
+										<option>{| choice |}</option>
+									{% endfor %}
+								</select>
+							{% else %}
+								<input v-model="item['{| field_options.field_name |}']" type="{| fields_input_types[field_options.field_name]|safe |}" />
+							{% endif %}
+							<button @click="() => item ? save('{| field_options.field_name |}', item['{| field_options.field_name |}']) : {}">Save</button>
+						</li>
+						<li v-else>
+							{# otherwise, show the field as read-only #}
+							<b>{| field_options.display_name |}:</b>
+							{% if field_options.custom_components_options|default(False) %}
+								{# render custom components if specified #}
+								{% for component_options in field_options.custom_components_options %}
+									<{| component_options.component_name |} :{| component_options.prop_name |}="item['{| field_options.field_name |}']" />
+								{% endfor %}
+							{% else %}
+								{# otherwise, show the field normally #}
+								<span>
+									{% if "date" in fields_input_types[field_options.field_name]|safe  %}
+										{{ getBeautifiedDateMaybe(item['{| field_options.field_name |}']) }}
+									{% else %}
+										{{ item['{| field_options.field_name |}'] }}
+									{% endif %}
+								</span>
+							{% endif %}
+						</li>
+					</template>
+				{% endif %}
+			{% endfor %}
+		</ul>
+		<div class="dj-data-entry__actions">
+			{# section for action buttons #}
+			{% for action_options in actions_options %}
+				<button @click="async () => {
+					{% for action in action_options.actions %}
+						{% if action._type == 'open_url' %}
+							{% if 'http://' in action.url or 'https://' in action.url %}
+								{% if action.new_tab %}
+									win.open(replaceSubstringWithObjectValue(`{| action.url |}`, (item || {})), '_blank')
+								{% else %}
+									win.location.href = replaceSubstringWithObjectValue(`{| action.url |}`, (item || {}))
+								{% endif %}
+							{% else %}
+								$router.push(replaceSubstringWithObjectValue(`{| action.url |}`, (item || {})))
+							{% endif %}
+						{% elif action._type == 'iterate' %}
+							await save('{| action.field_name |}', getNextItemOfArray({| fields_choices[action.field_name]|safe |}, (item || {})['{| action.field_name |}']))
+						{% elif action._type == 'toggle' %}
+							await save('{| action.field_name |}', !(item || {})['{| action.field_name |}'])
+						{% elif action._type == 'set_current_date' %}
+							await save('{| action.field_name |}', new Date())
+						{% endif %}
+					{% endfor %}
+				}" v-if="Array.from<any>({| action_options.roles|safe |}).includes(props.role)">
+					{| action_options.display_name |}
+				</button>
+			{% endfor %}
+		</div>
+	</div>
+<!-- SAFE REGION BEGIN -->
+
+<!-- SAFE REGION END -->
+</template>
+
+<script setup lang="ts">
+	import { ref, computed, onMounted, watch } from 'vue'
+	{% for field_options in fields_options %}
+		{% if field_options.custom_components_options|default(False) %}
+			{% for component_options in field_options.custom_components_options %}
+				{# import all custom components #}
+				import {| component_options.component_name |} from './{| component_options.component_name |}.vue'
+			{% endfor %}
+		{% endif %}
+	{% endfor %}
+
+	{# add all needed fields to the TypeScipt type #}
+	type Item = {
+		pk?: any,
+		{% for field_options in fields_options %}
+			{| field_options.field_name |}: any,
+		{% endfor %}
+	}
+
+	const props = defineProps<{
+		pk?: number,
+		role?: string,
+		authToken?: string,
+		{% if data_by_prop %}
+			{# add prop if data is passed by property instead of fetching #}
+			{| data_by_prop |}: Item,
+		{% endif %}
+	}>()
+	
+	{% if data_by_prop %}
+		const item = computed(() => props.{| data_by_prop |})
+	{% else %}
+		const item = ref<Item | null>(null)
+	{% endif %}
+
+	const allowedFields = computed<string[]>(() => {
+		const fields = []
+		{% for field_options in fields_options %}
+			{# compute which fields should be fetched for which role #}
+			{% if field_options.visible_by_roles|default(True) == True %}
+				fields.push('{| field_options.field_name |}')
+			{% else %}
+				if (Array.from<any>({| field_options.visible_by_roles|default(True)|safe |}).includes(props.role)) {
+					fields.push('{| field_options.field_name |}')
+				}
+			{% endif %}
+		{% endfor %}
+		return fields
+	})
+	
+	{% if not data_by_prop %}
+		/**
+		 * Fetch the data for this component. Only fetch the currently allowed fields.
+		 */
+		async function fetchData() {
+			const response = await fetch(
+				`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s/${props.pk}?_fields=${allowedFields.value.join(",")}`,
+				{
+					headers: {
+						'Authorization': `Token ${props.authToken}`
+					}
+				}
+			)
+			item.value = await response.json()
+		}
+
+		onMounted(fetchData)
+		watch(() => props.role, fetchData)
+	{% endif %}
+
+	/**
+	 * Send a request to update the given `field` with the given `value`
+	 */
+	async function save(field: string, value: any) {
+		const data = {
+			[field]: value
+		}
+		await fetch(`${import.meta.env.VITE_BACKEND_URL}/{| model_name|lower |}s/${props.pk}`, {
+			method: 'PATCH',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Token ${props.authToken}`
+			},
+			body: JSON.stringify(data),
+		})
+		{% if not data_by_prop %}
+			await fetchData()
+		{% endif %}
+	}
+
+	/**
+	 * Replace any occurence of the format `"{key}"` in `input` with `values[key]`
+	 */
+	function replaceSubstringWithObjectValue(input: string, values: Record<string, any>): string {
+		return input.replace(/\{(.*?)\}/g, (_, key) => values[key.trim()] ?? '')
+	}
+
+	/**
+	 * Get the item of the `array` that comes after `currentItem` (circular)
+	 */
+	function getNextItemOfArray<T>(array: T[], currentItem: T): T {
+		let index = array.indexOf(currentItem);
+		if (index === -1) {
+			throw new Error('Item not found in array');
+		}
+		let nextIndex = (index + 1) % array.length;
+		return array[nextIndex];
+	}
+
+	/**
+	 * Convert `dateOrString` to the local representation of the date if it is a date, otherwise keep it unchanged
+	 */
+	function getBeautifiedDateMaybe(dateOrString: string): string {
+		const parsed = Date.parse(dateOrString)
+		if (!isNaN(parsed)) {
+			return new Date(parsed).toLocaleString()
+		}
+		return dateOrString
+	}
+
+	const win = window
+
+/* SAFE REGION BEGIN */
+
+/* SAFE REGION END */
+</script>
+
+<style scoped>
+/* SAFE REGION BEGIN */
+
+/* SAFE REGION END */
+
+{% if styling %}
+	.dj-data-entry ul {
+		list-style: none;
+		padding-left: 1.5em;
+		width: fit-content;
+		min-width: 16em;
+		margin: 0;
+	}
+	.dj-data-entry > ul {
+		padding-left: 0;
+	}
+	.dj-data-entry ul li {
+		padding-block: 0.5em;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5em;
+		border-block: 1px solid #ccc;
+		margin-block: -1px;
+	}
+	.dj-data-entry ul li:has(ul) {
+		align-items: flex-start;
+	}
+	.dj-data-entry ul li:has(ul) > b {
+		padding-top: 0.5em;
+	}
+
+	.dj-data-entry ul li b {
+		margin-right: auto;
+	}
+
+	.dj-data-entry input, .dj-data-entry button, .dj-data-entry select {
+		font-size: 0.9em;
+	}
+	.dj-data-entry button {
+		background-color: #404040;
+		color: white;
+		border: 2px solid #ffffff4a;
+		border-radius: 0.25em;
+		padding: 0.25em 0.5em;
+		cursor: pointer;
+	}
+	.dj-data-entry button:hover {
+		opacity: 0.8;
+	}
+	.dj-data-entry input, .dj-data-entry select {
+		background-color: #f2f2f2;
+		border: 2px solid #00000020;
+		border-radius: 0.25em;
+		padding: 0.25em 0.5em;
+	}
+
+	.dj-data-entry input {
+		width: 14rem;
+	}
+
+	.dj-data-entry select + button {
+		margin-left: 1.75em;
+	}
+
+	.dj-data-entry__actions button {
+		margin-top: 1rem;
+		border-radius: 0;
+		border-right: none;
+		flex-grow: 1;
+	}
+	.dj-data-entry__actions button:first-child {
+		border-top-left-radius: 0.25em;
+		border-bottom-left-radius: 0.25em;
+	}
+	.dj-data-entry__actions button:last-child {
+		border-top-right-radius: 0.25em;
+		border-bottom-right-radius: 0.25em;
+		border-right: 2px solid #ffffff4a;
+	}
+{% endif %}
+</style>
